@@ -1,125 +1,277 @@
-// Create our 'main' state that will contain the game
-var mainState = {
-    preload: function() { 
-        // This function will be executed at the beginning     
-        // That's where we load the images and sounds 
-
-        game.load.image('player', 'assets/player.png');
-        game.load.image('wall', 'assets/wall.png');
-        game.load.image('coin', 'assets/coin.png');
-        game.load.image('enemy', 'assets/enemy.png');
-    },
-
-    create: function() { 
-        // Set the background color to blue
-        game.stage.backgroundColor = '#3598db';
-
-        // Start the Arcade physics system (for movements and collisions)
-        game.physics.startSystem(Phaser.Physics.ARCADE);
-
-        // Add the physics engine to all game objects
-        game.world.enableBody = true;
-
-        // Variable to store the arrow key pressed
-        this.cursor = game.input.keyboard.createCursorKeys();
-
-        // Create the player in the middle of the game
-        this.player = game.add.sprite(70, 100, 'player');
-
-        // Add gravity to make it fall
-        this.player.body.gravity.y = 600;
-
-        // Create 3 groups that will contain our objects
-        this.walls = game.add.group();
-        this.coins = game.add.group();
-        this.enemies = game.add.group();
-
-        // Design the level. x = wall, o = coin, ! = lava.
-        var level = [
-            'xxxxxxxxxxxxxxxxxxxxxx',
-            '!         !          x',
-            '!                 o  x',
-            '!         o          x',
-            '!                    x',
-            '!     o   !    x     x',
-            'xxxxxxxxxxxxxxxx!!!!!x',
-        ];
-
-        // Create the level by going through the array
-        for (var i = 0; i < level.length; i++) {
-            for (var j = 0; j < level[i].length; j++) {
-
-                // Create a wall and add it to the 'walls' group
-                if (level[i][j] == 'x') {
-                    var wall = game.add.sprite(30+20*j, 30+20*i, 'wall');
-                    this.walls.add(wall);
-                    wall.body.immovable = true; 
-                }
-
-                // Create a coin and add it to the 'coins' group
-                else if (level[i][j] == 'o') {
-                    var coin = game.add.sprite(30+20*j, 30+20*i, 'coin');
-                    this.coins.add(coin);
-                }
-
-                // Create a enemy and add it to the 'enemies' group
-                else if (level[i][j] == '!') {
-                    var enemy = game.add.sprite(30+20*j, 30+20*i, 'enemy');
-                    this.enemies.add(enemy);
-                }
-            }
+var config = {
+    type: Phaser.AUTO,
+    width: 500,
+    height: 500,
+    physics: {
+        default: 'arcade',
+        arcade: {
+            gravity: { y: 1500 },
+            debug: false
         }
     },
-
-    update: function() {
-
-        // Move the player when an arrow key is pressed
-        if (this.cursor.left.isDown) 
-            this.player.body.velocity.x = -200;
-        else if (this.cursor.right.isDown) 
-            this.player.body.velocity.x = 200;
-        else 
-            this.player.body.velocity.x = 0;
-
-        // Make the player jump if he is touching the ground
-        if (this.cursor.up.isDown && this.player.body.touching.down) 
-            this.player.body.velocity.y = -250;
-
-        var spaceKey = game.input.keyboard.addKey(Phaser.Keyboard.UP);
-        spaceKey.onDown.add(this.jump, this);
-        
-        // Make the player and the walls collide
-        game.physics.arcade.collide(this.player, this.walls);
-
-        // Call the 'takeCoin' function when the player takes a coin
-        game.physics.arcade.overlap(this.player, this.coins, this.takeCoin, null, this);
-
-        // Call the 'restart' function when the player touches the enemy
-        game.physics.arcade.overlap(this.player, this.enemies, this.restart, null, this);
-    },
-
-        // Function to kill a coin
-    jump: function() {
-        if(this.player.body.touching.down)
-            this.player.body.velocity.y = -250;
-    },
-
-    // Function to kill a coin
-    takeCoin: function(player, coin) {
-        coin.kill();
-    },
-
-    // Function to restart the game
-    restart: function() {
-        game.state.start('main');
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
     }
 };
 
-// Initialize Phaser, and create a 400px by 490px game
-var game = new Phaser.Game(500, 200);
+var populationSize = 5;
+var population;
+var player;
+var coins;
+var enemies;
+var platforms;
+var cursors;
+var score = 0;
+var gameOver = false;
+var scoreText;
 
-// Add the 'mainState' and call it 'main'
-game.state.add('main', mainState); 
+var game = new Phaser.Game(config);
 
-// Start the state to actually start the game
-game.state.start('main');
+function preload ()
+{
+    this.load.image('wall', 'assets/wall.png');
+    this.load.image('coin', 'assets/coin.png');
+    this.load.image('enemy', 'assets/enemy.png');
+
+    this.load.image('sky', 'assets/sky.png');
+    this.load.image('ground', 'assets/platform.png');
+    this.load.image('star', 'assets/star.png');
+    this.load.image('bomb', 'assets/bomb.png');
+    this.load.spritesheet('dude', 'assets/dude.png', { frameWidth: 33, frameHeight: 50 });
+
+    this.load.spritesheet('runner', 'assets/run.png', { frameWidth: 33, frameHeight: 57 });
+    this.load.spritesheet('jump', 'assets/jump.png', { frameWidth: 31, frameHeight: 64 });
+    this.load.spritesheet('jump-roll', 'assets/jump-roll.png', { frameWidth: 46.2, frameHeight: 59 });
+}
+
+function create ()
+{
+    //  A simple background for our game
+    this.add.image(250, 250, 'sky');
+
+
+    platforms = this.physics.add.group();
+    coins = this.physics.add.group();
+    enemies = this.physics.add.group();
+
+    // The player and its settings
+    //player = this.physics.add.sprite(175 , 75, 'runner');
+    this.anims.create({
+        key: 'run',
+        frames: this.anims.generateFrameNumbers('runner', { start: 0, end: 5 }),
+        frameRate: 10,
+        repeat: -1
+    });
+
+    this.anims.create({
+        key: 'jump',
+        frames: this.anims.generateFrameNumbers('jump-roll', { start: 0, end: 9 }),
+        frameRate: 10
+    });
+
+    //  Input Events
+    cursors = this.input.keyboard.createCursorKeys();
+
+    //  The score
+    scoreText = this.add.text(16, 16, 'score: 0', { fontSize: '32px', fill: '#000' });
+
+    population = [];
+    //  createplayer population
+    for(var i = 0; i < populationSize; i++)
+    {
+        population[i] = this.physics.add.sprite(175 + 10*i , 75, 'runner');
+        population[i].anims.play('run', true);
+        this.physics.add.collider(population[i], platforms);
+        this.physics.add.overlap(population[i], enemies, hitEnemy, null, this);
+    }
+
+    spawnEnemy(600,450);
+
+    for(var i = 0; i < 10; i++)
+    {
+        var platform = platforms.create(25 + 50*i, 475, 'wall');
+        platform.body.allowGravity = false;
+        platform.body.immovable = true;
+    }
+
+}
+
+function update ()
+{
+    if (gameOver)
+    {
+        resetGame();
+        return;
+    }
+
+    updatePopulation();
+
+    // check is enemy has left the screen
+    for(var i = 0; i < enemies.children.size; i++)
+    {
+        if(enemies.children.entries[i].x < 0)
+        {
+            enemies.remove(enemies.children.entries[i]);
+        }
+    }
+}
+
+function updatePopulation()
+{
+    var anyActive = false;
+    for(var i = 0; i < population.length; i++)
+    {
+        if(population[i].active === false)
+            continue;
+
+        anyActive = true;
+        if(population[i].isJumping && population[i].body.touching.down)
+        {
+            population[i].isJumping = false;
+            population[i].anims.play('run', true);
+        }
+    
+        if (cursors.up.isDown && population[i].body.touching.down)
+        {
+            population[i].setVelocityY(-550);
+            population[i].isJumping = true;
+            population[i].anims.play('jump', true);
+        }
+    }
+
+    if(!anyActive)
+    {
+        gameOver = true;
+    }
+}
+
+function resetGame()
+{
+    for(var i = 0; i < enemies.children.size; i++)
+    {
+        enemies.children.entries[i].destroy();
+    }
+
+    for(var i = 0; i < population.length; i++)
+    {
+        population[i].active = true;
+        population[i].alpha = 1;
+        population[i].setTint(0xffffff);
+        population[i].body.allowGravity = true;
+        population[i].anims.play('run', true);
+        population[i].isJumping = false;
+    }
+
+    gameOver = false;
+}
+
+function hitEnemy(player, enemy)
+{
+    if(!player.active)
+        return;
+
+    player.active = false;
+    player.alpha = 0.2;
+    player.setTint(0xff0000);
+    enemy.setTint(0xff0000);
+
+    player.body.allowGravity = false;
+    player.body.setVelocity(0,0);
+}
+
+function collectCoin (player, coin)
+{
+    coin.disableBody(true, true);
+
+    //  Add and update the score
+    score += 10;
+    scoreText.setText('Score: ' + score);
+
+    if (coins.countActive(true) === 0)
+    {
+        //  A new batch of stars to collect
+        //coins.children.iterate(function (child) {
+        //    child.enableBody(true, child.x, 0, true, true);
+        //});
+
+        // var x = (player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
+
+        // var bomb = bombs.create(x, 16, 'bomb');
+        // bomb.setBounce(1);
+        // bomb.setCollideWorldBounds(true);
+        // bomb.setVelocity(Phaser.Math.Between(-200, 200), 20);
+        // bomb.allowGravity = false;
+
+    }
+}
+
+function createMap()
+{
+    var level = [
+        'xxxxxxxxxx',
+        '!        x',
+        '!     o  x',
+        '!        x',
+        '!        x',
+        '!       ox',
+        '!        x',
+        '!        x',
+        '! o  x!!!x',
+        'xxxxxx!!!x',
+    ];
+
+    var cellSize = 50;
+    for (var i = 0; i < level.length; i++) {
+        for (var j = 0; j < level[i].length; j++) {
+            if(level[i][j] === 'x') {
+                platforms.create(cellSize*j + cellSize/2, cellSize*i + cellSize/2, 'wall');
+            }
+            else if (level[i][j] === 'o') {
+                coins.create(cellSize*j + cellSize/2, cellSize*i + cellSize/2, 'coin');
+            }
+            // Create a enemy and add it to the 'enemies' group
+            else if (level[i][j] === '!') {
+                platforms.create(cellSize*j + cellSize/2, cellSize*i + cellSize/2, 'enemy');
+                
+            }
+    
+        }
+    }
+}
+
+function spawnPlatform(x,y, width)
+{
+    while(width-- > 0)
+        spawnOnePlatform(x + width*50, y);
+}
+
+function spawnOnePlatform(x, y)
+{
+    var platform = platforms.create(x, y, 'wall').setOrigin(1,1);  
+    platform.setVelocity(-200, 0);
+    platform.body.allowGravity = false;
+    platform.body.immovable = true;
+}
+
+
+function spawnEnemy(x, y)
+{
+    var enemy = enemies.create(x, y, 'enemy').setOrigin(1,1);
+    enemy.setVelocity(-200, 0);
+    enemy.body.allowGravity = false;
+    enemy.body.immovable = true;
+
+    setTimeout(function(){spawnEnemy(x,y)}, Phaser.Math.Between(1000, 5000));
+}
+
+function spawnCoin(x, y)
+{
+    var coins = coins.create(x, y, 'coin').setOrigin(1,1);
+    enemy.setVelocity(-200, 0);
+    enemy.body.allowGravity = false;
+    enemy.body.immovable = true;
+
+    setTimeout(function(){spawnEnemy(x,y)}, Phaser.Math.Between(1000, 5000));
+}
